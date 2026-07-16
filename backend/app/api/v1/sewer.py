@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from typing import Any
-
+from app.services.sewer.network_validator import validate_sewer_network
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +50,32 @@ async def _require_dataset(
 
     return dataset
 
+@router.post(
+    "/datasets/{dataset_id}/validate",
+    dependencies=[Depends(require_any)],
+    summary="Validate normalized sewer network",
+)
+async def validate_dataset_sewer_network(
+    dataset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Run deterministic QA/QC rules against the normalized sewer graph."""
 
+    await _require_dataset(dataset_id, db)
+
+    try:
+        return await validate_sewer_network(
+            db,
+            dataset_id,
+        )
+    except Exception as exc:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Sewer network validation failed: {exc}",
+        ) from exc
+    
 @router.post(
     "/datasets/{dataset_id}/build-topology",
     response_model=SewerTopologySummary,
