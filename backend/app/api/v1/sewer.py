@@ -27,7 +27,13 @@ from app.schemas.sewer import (
     SewerTopologySummary,
 )
 from app.services.sewer.topology import build_topology_audit, topology_summary
-
+from app.services.sewer.graph_queries import (
+    get_connected_component,
+    get_direct_connections,
+    get_downstream_network,
+    get_graph_summary,
+    get_upstream_network,
+)
 router = APIRouter()
 
 
@@ -75,7 +81,113 @@ async def validate_dataset_sewer_network(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sewer network validation failed: {exc}",
         ) from exc
-    
+
+@router.get(
+    "/datasets/{dataset_id}/graph-summary",
+    dependencies=[Depends(require_any)],
+    summary="Get sewer graph summary",
+)
+async def get_dataset_graph_summary(
+    dataset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _require_dataset(dataset_id, db)
+
+    return await get_graph_summary(
+        db,
+        dataset_id,
+    )
+
+
+@router.get(
+    "/datasets/{dataset_id}/manholes/{manhole_id}/connections",
+    dependencies=[Depends(require_any)],
+    summary="Get direct manhole pipe connections",
+)
+async def get_manhole_connections(
+    dataset_id: uuid.UUID,
+    manhole_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _require_dataset(dataset_id, db)
+
+    result = await get_direct_connections(
+        db,
+        dataset_id,
+        manhole_id,
+    )
+
+    if not result["found"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Normalized sewer manhole was not found.",
+        )
+
+    return result
+
+
+@router.get(
+    "/datasets/{dataset_id}/manholes/{manhole_id}/upstream",
+    dependencies=[Depends(require_any)],
+    summary="Trace upstream sewer network",
+)
+async def trace_manhole_upstream(
+    dataset_id: uuid.UUID,
+    manhole_id: uuid.UUID,
+    max_depth: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _require_dataset(dataset_id, db)
+
+    return await get_upstream_network(
+        db,
+        dataset_id,
+        manhole_id,
+        max_depth=max_depth,
+    )
+
+
+@router.get(
+    "/datasets/{dataset_id}/manholes/{manhole_id}/downstream",
+    dependencies=[Depends(require_any)],
+    summary="Trace downstream sewer network",
+)
+async def trace_manhole_downstream(
+    dataset_id: uuid.UUID,
+    manhole_id: uuid.UUID,
+    max_depth: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _require_dataset(dataset_id, db)
+
+    return await get_downstream_network(
+        db,
+        dataset_id,
+        manhole_id,
+        max_depth=max_depth,
+    )
+
+
+@router.get(
+    "/datasets/{dataset_id}/manholes/{manhole_id}/component",
+    dependencies=[Depends(require_any)],
+    summary="Get connected sewer component",
+)
+async def get_manhole_component(
+    dataset_id: uuid.UUID,
+    manhole_id: uuid.UUID,
+    max_depth: int = Query(default=200, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    await _require_dataset(dataset_id, db)
+
+    return await get_connected_component(
+        db,
+        dataset_id,
+        manhole_id,
+        max_depth=max_depth,
+    )
+
 @router.post(
     "/datasets/{dataset_id}/build-topology",
     response_model=SewerTopologySummary,
